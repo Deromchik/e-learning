@@ -1,226 +1,226 @@
 ================================================================================
-ПОЯСНЕННЯ PIPELINE ПРОМПТІВ (Quiz Streamlit App)
+ПОЯСНЕНИЕ PIPELINE ПРОМПТОВ (Quiz Streamlit App)
 ================================================================================
-Документ описує послідовність викликів LLM у quiz_streamlit_app.py та зв’язок
-із файлами промптів. Детальні параметри моделей див. quiz_prompts_config.py
-(словник PROMPT_CONFIGS, функція get_prompt_config).
+Документ описывает последовательность вызовов LLM в quiz_streamlit_app.py и связь
+с файлами промптов. Подробные параметры моделей см. quiz_prompts_config.py
+(словарь PROMPT_CONFIGS, функция get_prompt_config).
 
-Загальні умови:
-- Усі виклики йдуть через OpenRouter (OpenAI-сумісний API), якщо не зазначено інакше.
-- Ключ API: OPENROUTER_API_KEY (st.secrets або змінна середовища).
-- Моделі для кожного кроку можна змінити в сайдбарі Streamlit або через env
-  (див. розділ «Змінні середовища» нижче).
+Общие условия:
+- Все вызовы идут через OpenRouter (OpenAI-совместимый API), если не указано иное.
+- Ключ API: OPENROUTER_API_KEY (st.secrets или переменная окружения).
+- Модели для каждого шага можно менять в сайдбаре Streamlit или через env
+  (см. раздел «Переменные окружения» ниже).
 
 
 --------------------------------------------------------------------------------
-СХЕМА ЕТАПІВ (за часом проходження квізу)
+СХЕМА ЭТАПОВ (по ходу прохождения квиза)
 --------------------------------------------------------------------------------
 
-  [Налаштування] → payload JSON, мова, складність
+  [Настройка] → payload JSON, язык, сложность
          │
          ▼
   ┌──────────────────┐
-  │ 1. GENERATE      │  Генерація списку питань (SHORT ANSWER або REASONING)
+  │ 1. GENERATE      │  Генерация списка вопросов (SHORT ANSWER или REASONING)
   └────────┬─────────┘
            ▼
   ┌──────────────────┐
-  │ 2. REPHRASE      │  Для кожного екрану питання: розмовна подача тексту
-  │    (на питання)  │  (кеш у session_state.rephrase_cache)
+  │ 2. REPHRASE      │  Для каждого экрана вопроса: разговорная подача текста
+  │    (на вопрос)   │  (кеш в session_state.rephrase_cache)
   └────────┬─────────┘
            ▼
-  Користувач відповідає → Submit
+  Пользователь отвечает → Submit
            │
            ▼
   ┌──────────────────┐
-  │ 3. VALIDATE      │  Оцінка відповіді: бали, intent, validation_error (JSON)
+  │ 3. VALIDATE      │  Оценка ответа: баллы, intent, validation_error (JSON)
   └────────┬─────────┘
            │
      ┌─────┴─────┐
-     │ пройшов   │  → наступне питання (знову крок 2)
-     │ поріг     │
+     │ прошёл    │  → следующий вопрос (снова шаг 2)
+     │ порог     │
      └─────┬─────┘
-           │ не пройшов
+           │ не прошёл
            ▼
   ┌──────────────────┐
-  │ 4. FOLLOW-UP     │  Окремий «тюторський» текст у чат (не заміна JSON-фідбеку
-  │    (після фейлу) │  валідатора; якщо виклик не вдався — показується validation_error)
+  │ 4. FOLLOW-UP     │  Отдельный «тьюторский» текст в чате (не замена JSON-фидбека
+  │    (после фейла) │  валидатора; если вызов не удался — показывается validation_error)
   └────────┬─────────┘
            ▼
-  Повтор вводу відповіді або вичерпання спроб → наступне питання / результати
+  Повтор ввода ответа или исчерпание попыток → следующий вопрос / результаты
            │
            ▼
   ┌──────────────────┐
-  │ 5. COMPLETION    │  Один раз на екрані результатів: тепле завершальне повідомлення
+  │ 5. COMPLETION    │  Один раз на экране результатов: тёплое завершающее сообщение
   └──────────────────┘
 
 
 --------------------------------------------------------------------------------
-КРОК 1 — ГЕНЕРАЦІЯ ПИТАНЬ (generate_questions)
+ШАГ 1 — ГЕНЕРАЦИЯ ВОПРОСОВ (generate_questions)
 --------------------------------------------------------------------------------
-Призначення:
-  За матеріалами уроку (gift, extracted text, інші топіки, попередні уроки)
-  згенерувати JSON: питання, допустимі відповіді, бали, min_pass_score,
-  max_attempts, max_execution_time. Режим SHORT ANSWER або REASONING залежить
-  від payload (topic_json.reasoningQuiz).
+Назначение:
+  По материалам урока (gift, extracted text, другие топики, предыдущие уроки)
+  сгенерировать JSON: вопросы, допустимые ответы, баллы, min_pass_score,
+  max_attempts, max_execution_time. Режим SHORT ANSWER или REASONING зависит
+  от payload (topic_json.reasoningQuiz).
 
-Де в коді:
+Где в коде:
   quiz_streamlit_app.py — build_system_prompt(), build_giftquiz_questions_prompt()
-  або build_giftquiz_reasoning_questions_prompt().
+  или build_giftquiz_reasoning_questions_prompt().
 
-Промпти:
-  Зашиті в quiz_streamlit_app.py як PROMPT_SYSTEM_TEMPLATE,
-  PROMPT_GIFTQUIZ_*_TEMPLATE (не винесені в окремий модуль).
+Промпты:
+  Зашиты в quiz_streamlit_app.py как PROMPT_SYSTEM_TEMPLATE,
+  PROMPT_GIFTQUIZ_*_TEMPLATE (не вынесены в отдельный модуль).
 
-Типове за замовчуванням моделі:
+Типовое значение модели по умолчанию:
   google/gemini-2.5-pro
 Env:
   OPENROUTER_MODEL
 
 
 --------------------------------------------------------------------------------
-КРОК 2 — РЕФРАЗЕР ПИТАННЯ (rephrase_question)
+ШАГ 2 — РЕФРАЗЕР ВОПРОСА (rephrase_question)
 --------------------------------------------------------------------------------
-Призначення:
-  Перетворити «сухе» питання з JSON на природну розмовну фразу; на першому
-  питанні — коротке інтро до квізу з quiz_summary. Після невдалої спроби
-  може додавати м’яке визнання (not_passed) згідно з промптом.
+Назначение:
+  Превратить «сухой» вопрос из JSON в естественную разговорную фразу; на первом
+  вопросе — короткое интро к квизу из quiz_summary. После неудачной попытки
+  может добавлять мягкое признание (not_passed) согласно промпту.
 
-Файл промптів:
+Файл промптов:
   quiz_question_rephraser.py
     - QUIZ_REPHRASER_SYSTEM_PROMPT
     - build_rephraser_user_prompt(...)
 
-Вхід у user-промпт:
+Вход в user-промпт:
   original_question, quiz_summary, is_first_question, language, not_passed,
-  conversation_history (повідомлення по всіх питаннях до поточного включно).
+  conversation_history (сообщения по всем вопросам до текущего включительно).
 
 Кеш:
-  Ключ: "{q_idx}:{len(conversation)}:{attempts}" — щоб не викликати LLM зайво
-  при кожному rerun Streamlit.
+  Ключ: "{q_idx}:{len(conversation)}:{attempts}" — чтобы не вызывать LLM лишний раз
+  при каждом rerun Streamlit.
 
-Типове за замовчуванням моделі:
+Типовое значение модели по умолчанию:
   openai/gpt-5.1-chat-latest
 Env:
   OPENROUTER_REPHRASE_MODEL
 
 UI:
-  На екрані показується рефразований текст; сирий текст питання — у згортачці.
+  На экране показывается рефразированный текст; сырой текст вопроса — в сворачиваемом блоке.
 
 
 --------------------------------------------------------------------------------
-КРОК 3 — ВАЛІДАЦІЯ ВІДПОВІДІ (validate_answer)
+ШАГ 3 — ВАЛИДАЦИЯ ОТВЕТА (validate_answer)
 --------------------------------------------------------------------------------
-Призначення:
-  Оцінити відповідь з урахуванням історії діалогу по поточному питанню
-  (combined answer), виставити validation_score [0..1], answer_score,
-  класифікувати user_intent, заповнити validation_error якщо не пройдено поріг
-  складності (без прямої видачі правильної відповіді).
+Назначение:
+  Оценить ответ с учётом истории диалога по текущему вопросу
+  (combined answer), выставить validation_score [0..1], answer_score,
+  классифицировать user_intent, заполнить validation_error если не пройден порог
+  сложности (без прямой выдачи правильного ответа).
 
-Файл промптів:
+Файл промптов:
   quiz_answer_validation.py
     - QUIZ_ANSWER_VALIDATION_SYSTEM_PROMPT_BASE
     - build_answer_validation_system_prompt(validation_instruction)
-        → додає блок складності з DIFFICULTY_LEVELS у quiz_streamlit_app.py
+        → добавляет блок сложности из DIFFICULTY_LEVELS в quiz_streamlit_app.py
     - build_answer_validation_user_prompt(...)
 
-Вихід:
-  Строгий JSON з полями validation_score, answer_score, user_intent,
+Выход:
+  Строгий JSON с полями validation_score, answer_score, user_intent,
   reasoning, validation_error.
 
-Типове за замовчуванням моделі:
+Типовое значение модели по умолчанию:
   openai/gpt-4o
 Env:
   OPENROUTER_VALIDATION_MODEL
 
-Додатково:
-  До запиту може додаватися extra_body з reasoning (як у додатку).
+Дополнительно:
+  К запросу может добавляться extra_body с reasoning (как в приложении).
 
 
 --------------------------------------------------------------------------------
-КРОК 4 — FOLLOW-UP ПІСЛЯ НЕВДАЛОЇ СПРОБИ (followup_after_fail)
+ШАГ 4 — FOLLOW-UP ПОСЛЕ НЕУДАЧНОЙ ПОПЫТКИ (followup_after_fail)
 --------------------------------------------------------------------------------
-Призначення:
-  Згенерувати короткий дружній текст для чату після того, як валідатор не
-  зарахував відповідь. Промпт забороняє дослівно цитувати validation_error і
-  видавати правильну відповідь; враховує intent, score, історію по поточному
-  питанню та по всьому квізу.
+Назначение:
+  Сгенерировать короткий дружелюбный текст для чата после того, как валидатор не
+  засчитал ответ. Промпт запрещает дословно цитировать validation_error и
+  выдавать правильный ответ; учитывает intent, score, историю по текущему
+  вопросу и по всему квизу.
 
-Файл промптів:
+Файл промптов:
   quiz_followup_question.py
     - QUIZ_FOLLOWUP_SYSTEM_PROMPT
     - followup_closeness_label(validation_score)
     - build_followup_user_prompt(...)
 
-Вхід:
-  quiz_question, user_answer, validation_error, validation_score (як у промпті),
+Вход:
+  quiz_question, user_answer, validation_error, validation_score (как в промпте),
   current_question_messages, conversation_history_all_questions, language,
   user_intent.
 
 Fallback:
-  Якщо виклик не вдався — у чат додається validation_error або "Try again!".
+  Если вызов не удался — в чат добавляется validation_error или "Try again!".
 
-Типове за замовчуванням моделі:
+Типовое значение модели по умолчанию:
   openai/gpt-5.1-chat-latest
 Env:
   OPENROUTER_FOLLOWUP_MODEL
 
 
 --------------------------------------------------------------------------------
-КРОК 5 — ПОВІДОМЛЕННЯ ПРО ЗАВЕРШЕННЯ (completion_message)
+ШАГ 5 — СООБЩЕНИЕ О ЗАВЕРШЕНИИ (completion_message)
 --------------------------------------------------------------------------------
-Призначення:
-  Після підрахунку підсумків квізу згенерувати 2–3 речення теплого,
-  природного прощання у цільовій мові (з урахуванням формальності для de/ru
-  у системному промпті).
+Назначение:
+  После подсчёта итогов квиза сгенерировать 2–3 предложения тёплого,
+  естественного прощания на целевом языке (с учётом формальности для de/ru
+  в системном промпте).
 
-Файл промптів:
+Файл промптов:
   quiz_completion_message.py
     - QUIZ_COMPLETION_SYSTEM_PROMPT
     - build_completion_user_prompt(quiz_summary, language)
 
-Вхід summary:
-  Текст з контексту квізу + бали, min pass, passed (див. _build_completion_summary
-  у quiz_streamlit_app.py).
+Вход summary:
+  Текст из контекста квиза + баллы, min pass, passed (см. _build_completion_summary
+  в quiz_streamlit_app.py).
 
-Збереження:
-  Результат кешується в session_state.completion_message_for_session, щоб
-  не викликати LLM повторно при rerun сторінки результатів.
+Сохранение:
+  Результат кешируется в session_state.completion_message_for_session, чтобы
+  не вызывать LLM повторно при rerun страницы результатов.
 
-Типове за замовчуванням моделі:
-  openai/gpt-5.1-chat-latest
+Типовое значение модели по умолчанию:
+  google/gemini-3.1-flash-lite-preview
 Env:
   OPENROUTER_COMPLETION_MODEL
 
 
 --------------------------------------------------------------------------------
-ЗМІННІ СЕРЕДОВИЩА / СЕКРЕТИ (коротко)
+ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ / СЕКРЕТЫ (кратко)
 --------------------------------------------------------------------------------
-  OPENROUTER_API_KEY          — обов’язково
-  OPENROUTER_MODEL            — крок 1 (генерація)
-  OPENROUTER_VALIDATION_MODEL — крок 3
-  OPENROUTER_REPHRASE_MODEL   — крок 2
-  OPENROUTER_FOLLOWUP_MODEL   — крок 4
-  OPENROUTER_COMPLETION_MODEL — крок 5
+  OPENROUTER_API_KEY          — обязательно
+  OPENROUTER_MODEL            — шаг 1 (генерация)
+  OPENROUTER_VALIDATION_MODEL — шаг 3
+  OPENROUTER_REPHRASE_MODEL   — шаг 2
+  OPENROUTER_FOLLOWUP_MODEL   — шаг 4
+  OPENROUTER_COMPLETION_MODEL — шаг 5
 
 
 --------------------------------------------------------------------------------
-ЛОГУВАННЯ
+ЛОГИРОВАНИЕ
 --------------------------------------------------------------------------------
-Кожен успішний виклик OpenRouter у додатку додається до st.session_state.api_logs
-із phase (наприклад generate_questions, rephrase_q0, validate_q0_attempt1,
-followup_q0_attempt1, completion_message). Лог можна завантажити JSON з сайдбару
-або з екрану результатів.
+Каждый успешный вызов OpenRouter в приложении добавляется в st.session_state.api_logs
+с phase (например generate_questions, rephrase_q0, validate_q0_attempt1,
+followup_q0_attempt1, completion_message). Лог можно скачать JSON из сайдбара
+или с экрана результатов.
 
 
 --------------------------------------------------------------------------------
-ДОВІДКА В КОДІ
+СПРАВКА В КОДЕ
 --------------------------------------------------------------------------------
-  quiz_streamlit_app.py   — оркестрація, виклики, кеші
-  quiz_prompts_config.py  — машиночитаний опис PROMPT_CONFIGS
+  quiz_streamlit_app.py   — оркестрация, вызовы, кеши
+  quiz_prompts_config.py  — машиночитаемое описание PROMPT_CONFIGS
   quiz_answer_validation.py, quiz_question_rephraser.py,
-  quiz_followup_question.py, quiz_completion_message.py — тексти та збірка
-  user/system промптів для кроків 2–5 (крок 1 — шаблони в streamlit app)
+  quiz_followup_question.py, quiz_completion_message.py — тексты и сборка
+  user/system промптов для шагов 2–5 (шаг 1 — шаблоны в streamlit app)
 
 ================================================================================
-Кінець файлу
+Конец файла
 ================================================================================

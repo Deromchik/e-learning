@@ -4,7 +4,9 @@ Streamlit Quiz App
 Combines prompt_review_runner_2-style question generation with the quiz pipeline
 prompts from quiz_answer_validation.py, quiz_question_rephraser.py,
 quiz_followup_question.py, and quiz_completion_message.py (imported as the
-canonical prompt source). All API calls are logged and available for download.
+canonical prompt source). All API calls are logged; download JSON or a TXT prompt stream
+from the sidebar. Quiz attempt limits apply only to intents other than clarification_request
+and off_topic.
 """
 
 from __future__ import annotations
@@ -17,6 +19,16 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import streamlit as st
+
+# User intents that are not graded quiz answers — do not consume max_attempts.
+_INTENTS_EXEMPT_FROM_ATTEMPT_QUOTA: frozenset[str] = frozenset(
+    {"clarification_request", "off_topic"}
+)
+
+
+def _normalize_user_intent_for_quota(raw: object) -> str:
+    s = str(raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return s
 
 from quiz_answer_validation import (
     build_answer_validation_system_prompt,
@@ -371,6 +383,7 @@ def _log_api_call(
     input_tokens: int,
     output_tokens: int,
     duration_ms: float,
+    metadata: Optional[dict] = None,
 ):
     _init_logs()
     entry = {
@@ -391,7 +404,44 @@ def _log_api_call(
         },
         "duration_ms": round(duration_ms, 1),
     }
+    if metadata:
+        entry["metadata"] = metadata
     st.session_state.api_logs.append(entry)
+
+
+def _format_logs_prompt_stream(entries: list) -> str:
+    """Human-readable chronological dump of every logged API call with full prompts."""
+    lines: list[str] = []
+    for i, e in enumerate(entries, 1):
+        lines.append("=" * 72)
+        lines.append(
+            f"[{i}] {e.get('timestamp', '')}  phase={e.get('phase', '')}"
+        )
+        req = e.get("request") or {}
+        lines.append(f"model: {req.get('model', '')}")
+        if e.get("metadata"):
+            lines.append(
+                "metadata: "
+                + json.dumps(e["metadata"], ensure_ascii=False)
+            )
+        usage = e.get("usage") or {}
+        lines.append(
+            f"tokens: in={usage.get('input_tokens', '')} "
+            f"out={usage.get('output_tokens', '')} "
+            f"duration_ms={e.get('duration_ms', '')}"
+        )
+        lines.append("")
+        lines.append("--- SYSTEM PROMPT ---")
+        lines.append(str(req.get("system_prompt") or ""))
+        lines.append("")
+        lines.append("--- USER PROMPT ---")
+        lines.append(str(req.get("user_prompt") or ""))
+        lines.append("")
+        lines.append("--- RAW RESPONSE ---")
+        resp = e.get("response") or {}
+        lines.append(str(resp.get("raw") or ""))
+        lines.append("")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -821,7 +871,7 @@ def main():
     followup_model_default = _get_secret(
         "OPENROUTER_FOLLOWUP_MODEL", "openai/gpt-5.1-chat-latest")
     completion_model_default = _get_secret(
-        "OPENROUTER_COMPLETION_MODEL", "openai/gpt-5.1-chat-latest")
+        "OPENROUTER_COMPLETION_MODEL", "google/gemini-3.1-flash-lite-preview")
 
     # ── Sidebar ───────────────────────────────────────────────────────────
     with st.sidebar:
@@ -851,7 +901,7 @@ def main():
         completion_model = st.text_input(
             "5. Completion message (end of quiz)",
             value=completion_model_default,
-            help="Default: OPENROUTER_COMPLETION_MODEL or openai/gpt-5.1-chat-latest",
+            help="Default: OPENROUTER_COMPLETION_MODEL or google/gemini-3.1-flash-lite-preview",
         )
 
         st.divider()
@@ -863,11 +913,20 @@ def main():
         if st.session_state.api_logs:
             logs_json = json.dumps(
                 st.session_state.api_logs, ensure_ascii=False, indent=2)
+            logs_txt = _format_logs_prompt_stream(st.session_state.api_logs)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             st.download_button(
                 "Download full logs (JSON)",
                 data=logs_json,
-                file_name=f"quiz_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                file_name=f"quiz_logs_{ts}.json",
                 mime="application/json",
+            )
+            st.download_button(
+                "Download prompt stream (TXT)",
+                data=logs_txt,
+                file_name=f"quiz_prompt_stream_{ts}.txt",
+                mime="text/plain",
+                help="Chronological text: every phase with full system/user prompts and raw responses.",
             )
             if st.button("Clear logs"):
                 st.session_state.api_logs = []
@@ -1122,6 +1181,9 @@ def _render_quiz(
     cols[2].metric("Question score", q["score"])
     cols[3].metric("Attempts used", ans_state["attempts"])
     cols[4].metric("Difficulty", diff_cfg["label"])
+    st.caption(
+        "Clarification and off-topic messages do not count toward max attempts."
+    )
 
     st.divider()
 
@@ -1206,9 +1268,10 @@ def _render_quiz(
             st.rerun()
         return
 
-    # Answer input
+    # Answer input (key uses conversation length so it refreshes after non-counting turns)
+    _input_key = f"answer_input_{q_idx}_{len(ans_state['conversation'])}"
     user_answer = st.text_area(
-        "Your answer:", key=f"answer_input_{q_idx}_{ans_state['attempts']}", height=100)
+        "Your answer:", key=_input_key, height=100)
 
     col_submit, col_skip = st.columns([1, 1])
 
@@ -1227,9 +1290,9 @@ def _render_quiz(
                 st.error("Please provide an OpenRouter API key in the sidebar.")
                 return
 
-            ans_state["attempts"] += 1
             ans_state["conversation"].append(
                 {"role": "user", "content": user_answer.strip()})
+            turn_idx = len(ans_state["conversation"])
 
             val_system = build_answer_validation_system_prompt(
                 diff_cfg["validation_instruction"])
@@ -1254,13 +1317,26 @@ def _render_quiz(
                     )
                 except Exception as e:
                     st.error(f"Validation API call failed: {e}")
-                    ans_state["attempts"] -= 1
                     ans_state["conversation"].pop()
                     return
 
             val_parsed = safe_json_loads(raw_val)
+            if not val_parsed:
+                st.error("Failed to parse validation response.")
+                st.code(raw_val)
+                ans_state["conversation"].pop()
+                return
+
+            v_score = float(val_parsed.get("validation_score", 0.0))
+            a_score = float(val_parsed.get("answer_score", 0.0))
+            user_intent = val_parsed.get("user_intent", "answer_attempt")
+            intent_norm = _normalize_user_intent_for_quota(user_intent)
+            exempt_from_attempt = intent_norm in _INTENTS_EXEMPT_FROM_ATTEMPT_QUOTA
+            if not exempt_from_attempt:
+                ans_state["attempts"] += 1
+
             _log_api_call(
-                phase=f"validate_q{q_idx}_attempt{ans_state['attempts']}",
+                phase=f"validate_q{q_idx}_turn{turn_idx}",
                 system_prompt=val_system,
                 user_prompt=val_user,
                 raw_response=raw_val,
@@ -1269,16 +1345,13 @@ def _render_quiz(
                 input_tokens=in_t,
                 output_tokens=out_t,
                 duration_ms=dur,
+                metadata={
+                    "question_index": q_idx,
+                    "user_intent": str(user_intent),
+                    "counts_as_quiz_attempt": not exempt_from_attempt,
+                },
             )
 
-            if not val_parsed:
-                st.error("Failed to parse validation response.")
-                st.code(raw_val)
-                return
-
-            v_score = float(val_parsed.get("validation_score", 0.0))
-            a_score = float(val_parsed.get("answer_score", 0.0))
-            user_intent = val_parsed.get("user_intent", "answer_attempt")
             validation_error = val_parsed.get("validation_error", "")
 
             if a_score > ans_state["best_score"]:
@@ -1317,9 +1390,7 @@ def _render_quiz(
                         top_p=0.9,
                     )
                     _log_api_call(
-                        phase=(
-                            f"followup_q{q_idx}_attempt{ans_state['attempts']}"
-                        ),
+                        phase=f"followup_q{q_idx}_turn{turn_idx}",
                         system_prompt=QUIZ_FOLLOWUP_SYSTEM_PROMPT,
                         user_prompt=fu_user,
                         raw_response=raw_fu,
@@ -1328,6 +1399,10 @@ def _render_quiz(
                         input_tokens=in_fu,
                         output_tokens=out_fu,
                         duration_ms=dur_fu,
+                        metadata={
+                            "question_index": q_idx,
+                            "user_intent": str(user_intent),
+                        },
                     )
                     followup_text = (raw_fu or "").strip()
                 except Exception as e:

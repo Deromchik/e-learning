@@ -87,6 +87,6 @@ async def quiz_completion_message(
         system_prompt=QUIZ_COMPLETION_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         temperature=0.6,
-        model="gpt-5.1-chat-latest",
+        model="google/gemini-3.1-flash-lite-preview",
         is_stream=True,
     )

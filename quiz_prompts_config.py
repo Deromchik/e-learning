@@ -151,7 +151,7 @@ PROMPT_CONFIGS = {
     "completion_message": {
         "description": "Коротке тепле завершення діалогу після екрану результатів.",
         "model": {
-            "current_default": "openai/gpt-5.1-chat-latest",
+            "current_default": "google/gemini-3.1-flash-lite-preview",
             "env": "OPENROUTER_COMPLETION_MODEL",
         },
         "parameters": {
