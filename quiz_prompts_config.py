@@ -92,7 +92,7 @@ PROMPT_CONFIGS = {
             "Перефразування питання квізу під розмовну подачу; інтро до квізу на першому питанні."
         ),
         "model": {
-            "current_default": "openai/gpt-5.1-chat-latest",
+            "current_default": "google/gemini-3.1-flash-lite-preview",
             "api_provider": "OpenRouter",
             "env": "OPENROUTER_REPHRASE_MODEL",
         },
@@ -123,7 +123,7 @@ PROMPT_CONFIGS = {
             "Короткий дружній follow-up у діалозі після невдалої спроби; не дублює validation_error дослівно."
         ),
         "model": {
-            "current_default": "openai/gpt-5.1-chat-latest",
+            "current_default": "google/gemini-3.1-flash-lite-preview",
             "env": "OPENROUTER_FOLLOWUP_MODEL",
         },
         "parameters": {

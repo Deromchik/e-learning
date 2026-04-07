@@ -99,7 +99,7 @@ Env:
   при каждом rerun Streamlit.
 
 Типовое значение модели по умолчанию:
-  openai/gpt-5.1-chat-latest
+  google/gemini-3.1-flash-lite-preview
 Env:
   OPENROUTER_REPHRASE_MODEL
 
@@ -160,7 +160,7 @@ Fallback:
   Если вызов не удался — в чат добавляется validation_error или "Try again!".
 
 Типовое значение модели по умолчанию:
-  openai/gpt-5.1-chat-latest
+  google/gemini-3.1-flash-lite-preview
 Env:
   OPENROUTER_FOLLOWUP_MODEL
 

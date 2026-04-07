@@ -273,6 +273,6 @@ async def quiz_question_rephraser(
         user_prompt=user_prompt,
         temperature=0.85,
         top_p=0.9,
-        model="gpt-5.1-chat-latest",
+        model="google/gemini-3.1-flash-lite-preview",
         is_stream=True,
     )

@@ -468,7 +468,7 @@ async def quiz_followup_question(
     return await generate_response(
         system_prompt=QUIZ_FOLLOWUP_SYSTEM_PROMPT,
         user_prompt=user_prompt,
-        model="gpt-5.1-chat-latest",
+        model="google/gemini-3.1-flash-lite-preview",
         temperature=0.85,
         top_p=0.9,
         is_stream=True,

@@ -873,9 +873,9 @@ def main():
     validation_model_default = _get_secret(
         "OPENROUTER_VALIDATION_MODEL", "openai/gpt-4o")
     rephrase_model_default = _get_secret(
-        "OPENROUTER_REPHRASE_MODEL", "openai/gpt-5.1-chat-latest")
+        "OPENROUTER_REPHRASE_MODEL", "google/gemini-3.1-flash-lite-preview")
     followup_model_default = _get_secret(
-        "OPENROUTER_FOLLOWUP_MODEL", "openai/gpt-5.1-chat-latest")
+        "OPENROUTER_FOLLOWUP_MODEL", "google/gemini-3.1-flash-lite-preview")
     completion_model_default = _get_secret(
         "OPENROUTER_COMPLETION_MODEL", "google/gemini-3.1-flash-lite-preview")
 
@@ -897,12 +897,12 @@ def main():
         rephrase_model = st.text_input(
             "3. Question rephrasing (spoken intro)",
             value=rephrase_model_default,
-            help="Default: OPENROUTER_REPHRASE_MODEL or openai/gpt-5.1-chat-latest",
+            help="Default: OPENROUTER_REPHRASE_MODEL or google/gemini-3.1-flash-lite-preview",
         )
         followup_model = st.text_input(
             "4. Follow-up tutor (after failed attempt)",
             value=followup_model_default,
-            help="Default: OPENROUTER_FOLLOWUP_MODEL or openai/gpt-5.1-chat-latest",
+            help="Default: OPENROUTER_FOLLOWUP_MODEL or google/gemini-3.1-flash-lite-preview",
         )
         completion_model = st.text_input(
             "5. Completion message (end of quiz)",
