@@ -723,13 +723,19 @@ def _build_completion_summary(
     passed: bool,
 ) -> str:
     base = st.session_state.get("quiz_summary") or "Quiz"
-    return (
-        f"{base}\n"
-        f"Questions: {len(questions)}\n"
-        f"Score: {total_earned:.1f} / {total_possible}\n"
-        f"Min pass score: {quiz_cfg.get('min_pass_score', 0)}\n"
-        f"Passed: {passed}\n"
-    )
+    lines = [
+        f"{base}",
+        f"Questions: {len(questions)}",
+        f"Score: {total_earned:.1f} / {total_possible}",
+        f"Min pass score: {quiz_cfg.get('min_pass_score', 0)}",
+        f"Passed: {passed}",
+    ]
+    if total_possible and total_possible > 0:
+        r = max(0.0, min(1.0, float(total_earned) / float(total_possible)))
+        lines.append(f"Performance ratio (earned/max): {r:.4f}")
+    else:
+        lines.append("Performance ratio (earned/max): unavailable (no maximum points)")
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------
