@@ -458,21 +458,48 @@ def _strip_code_fences(s: str) -> str:
     return s
 
 
+def _unwrap_outer_json_braces(s: str) -> str:
+    """Remove redundant outer {{ ... }} when models mirror doubled braces from prompts."""
+    s = (s or "").strip()
+    while len(s) >= 4 and s.startswith("{{") and s.endswith("}}"):
+        s = s[1:-1].strip()
+    return s
+
+
 def safe_json_loads(raw: str) -> Optional[dict]:
-    try:
-        return json.loads(raw)
-    except Exception:
-        pass
-    try:
-        return json.loads(_strip_code_fences(raw))
-    except Exception:
-        pass
+    if not isinstance(raw, str):
+        return None
+
+    def _try(s: str):
+        if not isinstance(s, str) or not s.strip():
+            return None
+        try:
+            return json.loads(s)
+        except Exception:
+            return None
+
+    candidates: list[str] = []
+    for base in (raw.strip(), _strip_code_fences(raw)):
+        if base and base not in candidates:
+            candidates.append(base)
+        u = _unwrap_outer_json_braces(base)
+        if u and u not in candidates:
+            candidates.append(u)
+
+    for s in candidates:
+        obj = _try(s)
+        if obj is not None:
+            return obj
+
     try:
         match = re.search(r"\{[\s\S]*\}", raw)
         if match:
-            return json.loads(match.group(0))
+            for s in (match.group(0), _unwrap_outer_json_braces(match.group(0))):
+                obj = _try(s)
+                if obj is not None:
+                    return obj
     except Exception:
-        return None
+        pass
     return None
 
 
