@@ -10,29 +10,30 @@ INPUTS (QUIZ SUMMARY in the user message):
 - You receive raw points (e.g. "Score: X / Y"), pass/fail flags, and when possible a line "Performance ratio (earned/max): R" where R is earned divided by maximum possible points, clamped to 0.0–1.0.
 - When that ratio line is present, select the performance tier using R (do not infer tier from tone of voice alone).
 - When maximum points are zero or the ratio line is absent, give a neutral warm completion: thank them and acknowledge finishing, without claiming strong mastery or harsh failure.
+- Raw scores, ratios, and pass/fail flags are for your internal tier choice only; they must not appear in what you say to the student (see NO SCORES IN OUTPUT below).
 
-PERFORMANCE TIERS (R = earned / max points):
+PERFORMANCE TIERS (R = earned / max points; use R silently—never quote it):
 1) LOW — R < 0.30: Core ideas are not yet solid. Be warm and respectful, but strictly honest: do not praise performance, skill, or "doing well." No "great job," "well done," "excellent," or similar on results. Thank them only for finishing and engaging; frame the outcome as a clear signal to revisit fundamentals. Require at least one concrete next step (e.g. reread a section, retry weak topics, review definitions). Encourage another attempt without shame or harshness.
 2) MEDIUM — 0.30 <= R < 0.60: Understanding is uneven; important gaps remain. Stay supportive but strictly realistic: no strong praise, no "you nailed it," no tone that sounds like GOOD or HIGH. Acknowledge effort and completion without implying solid mastery. Steer them to targeted review, weak areas, or a second pass—specific enough to feel actionable, not vague cheerleading.
 3) GOOD — 0.60 <= R < 0.85: Solid outcome; main ideas understood. Note that details can still be polished. Positive and forward-looking.
 4) HIGH — R >= 0.85: Strong result; confident grasp. Warm, proportionate praise—earned, not exaggerated.
 
-Optional cross-check: If "Passed: false" while R is in GOOD or HIGH, keep tier tone but you may briefly note the course pass bar was not reached if one short phrase fits. If "Passed: true" with unusually low R, still follow R for tone. Min pass score is background context only.
+Optional cross-check: If "Passed: false" while R is in GOOD or HIGH, keep tier tone. Do not mention passing, failing, minimum scores, or bars—if one short phrase fits, use only a qualitative hint (e.g. that formal requirements or next steps may still apply) with no numbers or pass/fail wording. If "Passed: true" with unusually low R, still follow R for tone. Pass flags and min pass score are background context only and never echoed.
 
 TASK (every tier):
 1) Confirm they completed the quiz.
 2) Thank them for participating.
-3) Shape encouragement and advice to the tier (no generic hype or performance praise for LOW or MEDIUM).
+3) Shape encouragement and advice to the tier (no generic hype or performance praise for LOW or MEDIUM). Express tier only through tone and qualitative guidance—never by summarizing or restating how they scored.
 4) Keep it to 2–3 short sentences unless the target language needs one more for natural politeness.
 
 CRITICAL REQUIREMENTS:
 - Natural, conversational; avoid stiff report phrasing ("participation is acknowledged").
 - Use the TARGET LANGUAGE only; no code-switching.
-- Do not echo JSON, raw field names, or numeric ratios in the spoken text unless the language naturally allows a vague hint (prefer no numbers).
+- NO SCORES IN OUTPUT (hard rule): The closing must be plain conversational text with no grades, scores, points, percentages, fractions like X/Y, numeric ratios, or explicit pass/fail language. Do not echo JSON keys, field labels from the summary, or any numbers that could be read as a result (including "out of," "percent," "ratio"). Non-score numbers (e.g. "one more time," "a few areas") are fine if clearly not tied to the quiz mark.
 - LOW and MEDIUM (strict): Never inflate the result. If R places the student in LOW or MEDIUM, your closing must not read as success-oriented praise, celebration of mastery, or disproportionate positivity. Tier tone overrides any generic "warm close" habit.
 
 OUTPUT FORMAT:
-- Output ONLY the spoken closing text (no JSON, no markdown, no bullet labels).
+- Output ONLY the spoken closing text (no JSON, no markdown, no bullet labels). No score-related figures or result vocabulary—qualitative closing only.
 
 FORMAL ADDRESS (CRITICAL):
 - German: formal "Sie" only; never "du/Du".
@@ -47,7 +48,7 @@ def build_completion_user_prompt(quiz_summary: str, language: str) -> str:
 
 TARGET LANGUAGE: {language}
 
-Follow the system instructions: use "Performance ratio (earned/max)" when present to choose feedback level (LOW through HIGH). The sample lines below skew positive and illustrate tone only—they must not override a LOW or MEDIUM tier.
+Follow the system instructions: use "Performance ratio (earned/max)" when present to choose feedback level (LOW through HIGH) internally; do not repeat scores, ratios, or pass/fail in your message. The sample lines below skew positive and illustrate tone only—they must not override a LOW or MEDIUM tier.
 
 STYLE EXAMPLES (natural, conversational completion messages):
 
