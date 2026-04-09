@@ -47,6 +47,8 @@ from quiz_question_rephraser import (
     build_rephraser_user_prompt,
 )
 
+from payloads import PAYLOADS
+
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
@@ -275,6 +277,7 @@ PROMPT_GIFTQUIZ_QUESTIONS_TEMPLATE: str = (
     "{extracted_block}"
     "{other_block}"
     "{prev_block}"
+    "{summary_block}"
     "=== QUESTION GENERATION GUIDELINES ===\n\n"
     "1. DIVERSITY (CRITICAL): Each question MUST test a DIFFERENT concept or term.\n"
     "   - Do NOT create multiple questions with the same answer.\n"
@@ -320,6 +323,7 @@ PROMPT_GIFTQUIZ_REASONING_QUESTIONS_TEMPLATE: str = (
     "{extracted_block}"
     "{other_block}"
     "{prev_block}"
+    "{summary_block}"
     "=== REASONING QUESTION GUIDELINES ===\n\n"
     "1. SCENARIO DIVERSITY: Each question MUST present a UNIQUE scenario testing different aspects.\n"
     "   - Cover various real-world applications of the lesson concepts.\n"
@@ -625,6 +629,20 @@ def build_system_prompt(course_language: str) -> str:
     )
 
 
+def _payload_summaries_block(data: dict) -> str:
+    """Lesson/course webhook payloads carry topic_summaries or lesson_summaries."""
+    parts: list[str] = []
+    ts = data.get("topic_summaries") or []
+    if ts:
+        body = "\n\n---\n\n".join(str(s)[:8000] for s in ts[:20])
+        parts.append(f"Topic summaries (webhook / lesson scope):\n{body}\n\n")
+    ls = data.get("lesson_summaries") or []
+    if ls:
+        body = "\n\n---\n\n".join(str(s)[:8000] for s in ls[:20])
+        parts.append(f"Lesson summaries (webhook / course scope):\n{body}\n\n")
+    return "".join(parts)
+
+
 def build_giftquiz_questions_prompt(payload: dict, course_language: str = "en", difficulty_level: int = 3) -> str:
     language_name = get_language_name(course_language)
     difficulty_cfg = get_difficulty_config(difficulty_level)
@@ -640,6 +658,7 @@ def build_giftquiz_questions_prompt(payload: dict, course_language: str = "en", 
             other_texts.append(f"- {title}: {text[:1000]}")
     prev_summaries = data.get("previous_lesson_summaries") or []
     prev_text = "\n".join(str(s)[:1000] for s in prev_summaries[:20])
+    summary_block = _payload_summaries_block(data)
 
     extracted_block = PROMPT_GIFTQUIZ_EXTRACTED_BLOCK_TEMPLATE.format(
         extracted=extracted) if extracted else ""
@@ -652,6 +671,7 @@ def build_giftquiz_questions_prompt(payload: dict, course_language: str = "en", 
         language_name=language_name, course_language=course_language,
         gift_text=gift_text, extracted_block=extracted_block,
         other_block=other_block, prev_block=prev_block,
+        summary_block=summary_block,
         difficulty_block=difficulty_cfg["question_generation_instruction"],
     )
 
@@ -671,6 +691,7 @@ def build_giftquiz_reasoning_questions_prompt(payload: dict, course_language: st
             other_texts.append(f"- {title}: {text[:1000]}")
     prev_summaries = data.get("previous_lesson_summaries") or []
     prev_text = "\n".join(str(s)[:1000] for s in prev_summaries[:20])
+    summary_block = _payload_summaries_block(data)
 
     extracted_block = PROMPT_GIFTQUIZ_EXTRACTED_BLOCK_TEMPLATE.format(
         extracted=extracted) if extracted else ""
@@ -683,12 +704,19 @@ def build_giftquiz_reasoning_questions_prompt(payload: dict, course_language: st
         language_name=language_name, course_language=course_language,
         gift_text=gift_text, extracted_block=extracted_block,
         other_block=other_block, prev_block=prev_block,
+        summary_block=summary_block,
         difficulty_block=difficulty_cfg["reasoning_generation_instruction"],
     )
 
 
 def _quiz_summary_from_payload(payload: dict) -> str:
     data = payload.get("data") or {}
+    ptype = payload.get("type")
+    eid = payload.get("entity_id")
+    if ptype == "lesson" and eid is not None:
+        return f"Lesson {eid}"
+    if ptype == "course" and eid is not None:
+        return f"Course {eid}"
     title = (data.get("title") or "Quiz").strip()
     intro = (data.get("introduction") or "").strip()
     gift = (data.get("gift") or "").strip()
@@ -739,90 +767,26 @@ def _build_completion_summary(
 
 
 # ---------------------------------------------------------------------------
-# DEFAULT PAYLOADS (from prompt_review_runner_2.py — only GiftQuiz topics)
+# DEFAULT PAYLOADS (canonical list in payloads.py)
 # ---------------------------------------------------------------------------
+def _preset_payload_label(p: dict) -> str:
+    ptype = str(p.get("type") or "?")
+    eid = p.get("entity_id", "?")
+    data = p.get("data") or {}
+    if ptype == "topic":
+        tj = data.get("topic_json") or {}
+        if tj.get("reasoningQuiz"):
+            return f"Topic #{eid} — GiftQuiz (reasoning)"
+        return f"Topic #{eid} — GiftQuiz (short answers)"
+    if ptype == "lesson":
+        return f"Lesson #{eid} — topic_summaries"
+    if ptype == "course":
+        return f"Course #{eid} — lesson_summaries"
+    return f"{ptype} #{eid}"
+
+
 DEFAULT_PAYLOADS: list[dict] = [
-    {
-        "label": "Quiz #1283 — Quantum Computer (reasoning)",
-        "type": "topic",
-        "course_id": 27,
-        "entity_id": 1283,
-        "topic_type": "EscolaLms\\TopicTypeGift\\Models\\GiftQuiz",
-        "course_language": "en",
-        "data": {
-            "title": "Quiz",
-            "introduction": "Ok12",
-            "topicable_class": "EscolaLms\\TopicTypeGift\\Models\\GiftQuiz",
-            "gift": "theProject",
-            "topic_json": {"reasoningQuiz": True},
-            "questions_count": 4,
-            "questions": [
-                {"question": "What type of computer performs calculations using the principles of quantum mechanics? {=Quantum computer=A quantum computer}",
-                    "type": "short_answers", "max_score": 25},
-                {"question": "What is the basic unit of information in a quantum computer, which can represent more than just 0 or 1? {=Qubit=Qubits}",
-                    "type": "short_answers", "max_score": 25},
-                {"question": "In contrast to quantum computers, what is the basic unit of information in classical computers? {=Bit=Bits}",
-                    "type": "short_answers", "max_score": 25},
-                {"question": "What field of physics provides the principles that quantum computers use for calculations? {=Quantum mechanics=The principles of quantum mechanics}",
-                    "type": "short_answers", "max_score": 25},
-            ],
-            "lesson_other_topics": [
-                {
-                    "title": "A quantum computer",
-                    "topicable_type": "EscolaLms\\TopicTypes\\Models\\TopicContent\\RichText",
-                    "text": (
-                        "A quantum computer is a type of computer that uses the principles of "
-                        "quantum mechanics to perform calculations. Unlike classical computers "
-                        "that use bits to represent either a 0 or a 1, quantum computers use "
-                        "qubits which can represent 0, 1, or both simultaneously through a property "
-                        "called superposition."
-                    ),
-                }
-            ],
-            "previous_lesson_summaries": [],
-        },
-    },
-    {
-        "label": "Quiz #1369 — Quantum State (short answers)",
-        "type": "topic",
-        "course_id": 27,
-        "entity_id": 1369,
-        "topic_type": "EscolaLms\\TopicTypeGift\\Models\\GiftQuiz",
-        "course_language": "en",
-        "data": {
-            "title": "Quiz",
-            "topicable_class": "EscolaLms\\TopicTypeGift\\Models\\GiftQuiz",
-            "gift": "theProject",
-            "questions_count": 5,
-            "questions": [
-                {"question": "What term describes the mathematical representation of a quantum system that holds all possible information about it? {=Quantum state}",
-                    "type": "short_answers", "max_score": 10},
-                {"question": "What is the basic unit of quantum information, analogous to a bit in classical computing? {=Qubit=Quantum bit}",
-                    "type": "short_answers", "max_score": 10},
-                {"question": "What quantum principle allows a qubit to be in a combination of both 0 and 1 states at the same time? {=Superposition}",
-                    "type": "short_answers", "max_score": 10},
-                {"question": "What is the name for the quantum phenomenon where multiple qubits are linked and their states are correlated, no matter how far apart they are? {=Entanglement=Quantum entanglement}",
-                    "type": "short_answers", "max_score": 10},
-                {"question": "According to the lesson material, what is one mathematical object used to represent a quantum state? {=State vector=Wavefunction}",
-                    "type": "short_answers", "max_score": 10},
-            ],
-            "lesson_other_topics": [
-                {
-                    "title": "A quantum state",
-                    "topicable_type": "EscolaLms\\TopicTypes\\Models\\TopicContent\\RichText",
-                    "text": (
-                        "A quantum state is a mathematical description of a quantum system, like "
-                        "a particle, that contains all possible information about it. It is "
-                        "represented by a state vector or wavefunction and determines the "
-                        "probabilities of the system's properties when measured."
-                    ),
-                }
-            ],
-            "previous_lesson_summaries": [
-                "This lesson introduces quantum computing, which uses quantum-mechanical phenomena for calculations."
-            ],
-        },
-    },
+    {**p, "label": _preset_payload_label(p)} for p in PAYLOADS
 ]
 
 
@@ -1015,7 +979,7 @@ def _render_setup():
 
     with tab_preset:
         labels = [p["label"] for p in DEFAULT_PAYLOADS]
-        choice = st.selectbox("Choose a preset quiz payload", labels)
+        choice = st.selectbox("Choose a preset payload", labels)
         idx = labels.index(choice)
         selected = DEFAULT_PAYLOADS[idx]
         st.json(selected, expanded=False)
