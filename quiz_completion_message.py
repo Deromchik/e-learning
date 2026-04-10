@@ -60,12 +60,7 @@ FORMAL ADDRESS:
 • English and other languages: formal register appropriate for an educational context."""
 
 
-def build_completion_user_prompt(
-    quiz_summary: str,
-    language: str,
-    *,
-    course_context: str | None = None,
-) -> str:
+def build_completion_user_prompt(quiz_summary: str, language: str) -> str:
     return f"""QUIZ SUMMARY:
 {quiz_summary}
 TARGET LANGUAGE: {language}
@@ -105,8 +100,7 @@ async def quiz_completion_message(
             "Use QUIZ_COMPLETION_SYSTEM_PROMPT and build_completion_user_prompt with your own client."
         ) from e
 
-    user_prompt = build_completion_user_prompt(
-        quiz_summary, language, course_context=None)
+    user_prompt = build_completion_user_prompt(quiz_summary, language)
     return await generate_response(
         system_prompt=QUIZ_COMPLETION_SYSTEM_PROMPT,
         user_prompt=user_prompt,

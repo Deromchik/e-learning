@@ -11,7 +11,6 @@ and off_topic.
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import re
@@ -767,124 +766,6 @@ def _build_completion_summary(
     return "\n".join(lines) + "\n"
 
 
-def _current_payload_from_session() -> dict:
-    try:
-        return json.loads(st.session_state.get("payload_json_text") or "{}")
-    except json.JSONDecodeError:
-        return {}
-
-
-def _current_payload_entity_id() -> int | None:
-    raw = _current_payload_from_session().get("entity_id")
-    try:
-        return int(raw) if raw is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _payload_unit_title(payload: dict) -> str:
-    data = payload.get("data") or {}
-    t = (data.get("title") or "").strip()
-    return t or "Quiz"
-
-
-def _ensure_course_run_stat_recorded(
-    total_earned: float,
-    total_possible: float,
-    passed: bool,
-    n_questions: int,
-) -> None:
-    queue = st.session_state.get("course_run_topics")
-    if not queue:
-        return
-    eid = _current_payload_entity_id()
-    if eid is None:
-        return
-    stats: list[dict] = st.session_state.setdefault(
-        "course_run_completed_stats", [])
-    if any(s.get("entity_id") == eid for s in stats):
-        return
-    r: float | None
-    if total_possible and total_possible > 0:
-        r = max(0.0, min(1.0, float(total_earned) / float(total_possible)))
-    else:
-        r = None
-    unit = (st.session_state.get("quiz_summary") or "").strip() or _payload_unit_title(
-        _current_payload_from_session()
-    )
-    stats.append({
-        "entity_id": eid,
-        "unit_label": unit,
-        "n_questions": n_questions,
-        "total_earned": total_earned,
-        "total_possible": total_possible,
-        "passed": passed,
-        "ratio": r,
-    })
-
-
-def _build_completion_scope_context(
-    *,
-    total_earned: float,
-    total_possible: float,
-) -> str:
-    payload = _current_payload_from_session()
-    eid = _current_payload_entity_id()
-    unit = (st.session_state.get("quiz_summary") or "").strip() or _payload_unit_title(
-        payload
-    )
-    queue = st.session_state.get("course_run_topics")
-    idx = int(st.session_state.get("course_run_index") or 0)
-
-    cid = payload.get("course_id")
-
-    if not queue:
-        return (
-            "SCOPE: SINGLE_TOPIC\n"
-            "The learner completed one standalone assessment unit (one topic).\n"
-            f"Unit label (internal): {unit}\n"
-            f"Entity id (internal): {eid}\n"
-            f"Course id (internal): {cid}\n"
-            "Give feedback focused on this unit only. Do not imply a multi-topic course "
-            "unless the unit label itself suggests a broader module."
-        )
-
-    n = len(queue)
-    is_final = idx >= n - 1
-    scope = "COURSE_RUN_FINAL" if is_final else "COURSE_RUN_PROGRESS"
-    stats = list(st.session_state.get("course_run_completed_stats") or [])
-    meta_lines = []
-    for s in stats:
-        r = s.get("ratio")
-        rpart = f"ratio={float(r):.4f}" if r is not None else "ratio=n/a"
-        meta_lines.append(
-            f"  - entity_id={s.get('entity_id')}, unit={s.get('unit_label')}, "
-            f"{rpart}, passed={s.get('passed')}"
-        )
-    ce = sum(float(s.get("total_earned") or 0) for s in stats)
-    cp = sum(float(s.get("total_possible") or 0) for s in stats)
-    rall = max(0.0, min(1.0, ce / cp)) if cp > 0 else None
-
-    parts = [
-        f"SCOPE: {scope}",
-        f"Multi-topic course run: finished topic {idx + 1} of {n} in this session.",
-        f"Course id (internal): {cid}",
-        f"Current unit (internal): {unit} (entity_id={eid})",
-        "Per-topic internal stats (never quote to student):",
-        *meta_lines,
-    ]
-    if is_final and rall is not None:
-        parts.append(
-            f"COURSE_CUMULATIVE_RATIO (internal only): {rall:.4f}"
-        )
-    parts.append(
-        "Framing: For PROGRESS, acknowledge forward motion in the course qualitatively and "
-        "encourage the next step. For FINAL, acknowledge completing the entire sequence "
-        "and use cumulative signal only as secondary to this quiz's tier—never output numbers."
-    )
-    return "\n".join(parts) + "\n"
-
-
 # ---------------------------------------------------------------------------
 # DEFAULT PAYLOADS (canonical list in payloads.py)
 # ---------------------------------------------------------------------------
@@ -911,53 +792,6 @@ DEFAULT_PAYLOADS: list[dict] = [
 ]
 
 
-def _is_gift_quiz_topic_payload(p: dict) -> bool:
-    if p.get("type") != "topic":
-        return False
-    return "GiftQuiz" in str(p.get("topic_type") or "")
-
-
-def _course_ids_with_gift_topics() -> list[int]:
-    return sorted(
-        {int(p["course_id"]) for p in PAYLOADS if _is_gift_quiz_topic_payload(p)}
-    )
-
-
-def _gift_topic_count_for_course(course_id: int) -> int:
-    return sum(
-        1 for p in PAYLOADS
-        if _is_gift_quiz_topic_payload(p) and int(p.get("course_id") or -1) == int(course_id)
-    )
-
-
-def _gift_topic_payloads_for_course(course_id: int) -> list[dict]:
-    rows = [
-        p for p in PAYLOADS
-        if _is_gift_quiz_topic_payload(p) and int(p.get("course_id") or -1) == int(course_id)
-    ]
-    rows.sort(key=lambda x: int(x.get("entity_id") or 0))
-    return [copy.deepcopy(p) for p in rows]
-
-
-def _clear_course_run_state():
-    st.session_state.pop("course_run_topics", None)
-    st.session_state.pop("course_run_index", None)
-    st.session_state.pop("course_run_completed_stats", None)
-
-
-def _reset_quiz_payload_state_for_new_topic():
-    """Between course-run topics: keep queue, clear completed quiz."""
-    st.session_state.questions = []
-    st.session_state.quiz_cfg = {}
-    st.session_state.current_q_idx = 0
-    st.session_state.answers = {}
-    st.session_state.total_score = 0.0
-    st.session_state.quiz_summary = ""
-    st.session_state.rephrase_cache = {}
-    st.session_state.pop("completion_message_for_session", None)
-    st.session_state.is_reasoning = False
-
-
 # ---------------------------------------------------------------------------
 # SESSION STATE INIT
 # ---------------------------------------------------------------------------
@@ -978,10 +812,6 @@ def _init_state():
         "course_language": "en",   # ISO 639-1 code
         "quiz_summary": "",
         "rephrase_cache": {},      # key -> conversational question text
-        # Sequential run: all GiftQuiz topics for one course_id (see _gift_topic_payloads_for_course)
-        "course_run_topics": None,   # None = not in course-run mode; else list[dict]
-        "course_run_index": 0,
-        "course_run_completed_stats": None,  # list[dict] while course run active
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1080,7 +910,6 @@ def main():
                 if k not in ("api_logs",):
                     del st.session_state[k]
             _init_state()
-            _clear_course_run_state()
             st.rerun()
 
     # ── Main area ─────────────────────────────────────────────────────────
@@ -1148,9 +977,7 @@ def _render_setup():
     st.divider()
     st.subheader("2. Select or paste a payload")
 
-    tab_preset, tab_course, tab_custom = st.tabs(
-        ["Preset payloads", "Course run (all topics)", "Custom JSON"]
-    )
+    tab_preset, tab_custom = st.tabs(["Preset payloads", "Custom JSON"])
 
     with tab_preset:
         labels = [p["label"] for p in DEFAULT_PAYLOADS]
@@ -1159,43 +986,10 @@ def _render_setup():
         selected = DEFAULT_PAYLOADS[idx]
         st.json(selected, expanded=False)
         if st.button("Use this payload", key="btn_preset"):
-            _clear_course_run_state()
             st.session_state.payload_json_text = json.dumps(
                 selected, ensure_ascii=False, indent=2)
             st.session_state.stage = "generating"
             st.rerun()
-
-    with tab_course:
-        course_ids = _course_ids_with_gift_topics()
-        if not course_ids:
-            st.warning("No GiftQuiz topic payloads found in payloads.py.")
-        else:
-            pick = st.selectbox(
-                "Course (all GiftQuiz topics in entity_id order)",
-                options=course_ids,
-                format_func=lambda cid: (
-                    f"course_id={cid} — {_gift_topic_count_for_course(cid)} topic(s)"
-                ),
-                key="course_run_select_course",
-            )
-            n_topics = _gift_topic_count_for_course(pick)
-            st.caption(
-                f"Runs **{n_topics}** quiz(es) back-to-back: after each results screen, "
-                "use **Next topic in course** to generate the next quiz."
-            )
-            if st.button("Start course run", type="primary", key="btn_course_run"):
-                queue = _gift_topic_payloads_for_course(int(pick))
-                if not queue:
-                    st.error("No topics for this course.")
-                else:
-                    _clear_course_run_state()
-                    st.session_state.course_run_topics = queue
-                    st.session_state.course_run_index = 0
-                    st.session_state.course_run_completed_stats = []
-                    st.session_state.payload_json_text = json.dumps(
-                        queue[0], ensure_ascii=False, indent=2)
-                    st.session_state.stage = "generating"
-                    st.rerun()
 
     with tab_custom:
         custom = st.text_area("Paste payload JSON", height=300,
@@ -1203,7 +997,6 @@ def _render_setup():
         if st.button("Use custom payload", key="btn_custom"):
             try:
                 parsed = json.loads(custom)
-                _clear_course_run_state()
                 st.session_state.payload_json_text = json.dumps(
                     parsed, ensure_ascii=False, indent=2)
                 st.session_state.stage = "generating"
@@ -1238,7 +1031,6 @@ def _render_generating(api_key: str, model: str):
     if not api_key:
         st.error("Please provide an OpenRouter API key in the sidebar.")
         if st.button("Back"):
-            _clear_course_run_state()
             st.session_state.stage = "setup"
             st.rerun()
         return
@@ -1259,7 +1051,6 @@ def _render_generating(api_key: str, model: str):
         except Exception as e:
             st.error(f"API call failed: {e}")
             if st.button("Back"):
-                _clear_course_run_state()
                 st.session_state.stage = "setup"
                 st.rerun()
             return
@@ -1281,7 +1072,6 @@ def _render_generating(api_key: str, model: str):
         st.error("Failed to parse LLM response as JSON.")
         st.code(raw, language="json")
         if st.button("Back"):
-            _clear_course_run_state()
             st.session_state.stage = "setup"
             st.rerun()
         return
@@ -1291,7 +1081,6 @@ def _render_generating(api_key: str, model: str):
         st.error("No valid questions generated.")
         st.code(raw, language="json")
         if st.button("Back"):
-            _clear_course_run_state()
             st.session_state.stage = "setup"
             st.rerun()
         return
@@ -1336,18 +1125,6 @@ def _render_quiz(
     total_q = len(questions)
     max_attempts = quiz_cfg.get("max_attempts", 3)
     course_language = st.session_state.get("course_language", "en")
-
-    cr_queue = st.session_state.get("course_run_topics")
-    if cr_queue:
-        cr_i = int(st.session_state.get("course_run_index") or 0)
-        try:
-            cur = json.loads(st.session_state.get("payload_json_text") or "{}")
-            cr_eid = cur.get("entity_id", "?")
-        except json.JSONDecodeError:
-            cr_eid = "?"
-        st.info(
-            f"**Course run** — topic {cr_i + 1}/{len(cr_queue)} · entity_id={cr_eid}"
-        )
 
     difficulty_level = st.session_state.get("difficulty_level", 3)
     diff_cfg = get_difficulty_config(difficulty_level)
@@ -1626,9 +1403,6 @@ def _render_results(api_key: str, completion_model: str):
     min_pass = quiz_cfg.get("min_pass_score", 0)
     passed = total_earned >= min_pass
 
-    _ensure_course_run_stat_recorded(
-        total_earned, total_possible, passed, len(questions))
-
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Score", f"{total_earned:.1f} / {total_possible}")
     col2.metric("Min Pass Score", f"{min_pass}")
@@ -1645,12 +1419,9 @@ def _render_results(api_key: str, completion_model: str):
         summary = _build_completion_summary(
             questions, quiz_cfg, answers, total_earned, total_possible, passed
         )
-        scope_ctx = _build_completion_scope_context(
-            total_earned=total_earned, total_possible=total_possible)
         text_out = ""
         if api_key:
-            comp_user = build_completion_user_prompt(
-                summary, lang_completion, course_context=scope_ctx)
+            comp_user = build_completion_user_prompt(summary, lang_completion)
             try:
                 with st.spinner("Generating closing message..."):
                     raw_c, m_c, in_c, out_c, dur_c = call_openrouter(
@@ -1723,34 +1494,7 @@ def _render_results(api_key: str, completion_model: str):
                 st.markdown(
                     f"**{i+1}. [{log['phase']}]** — {log['timestamp']} — {log['usage']['input_tokens']}in/{log['usage']['output_tokens']}out — {log['duration_ms']}ms")
 
-    queue = st.session_state.get("course_run_topics")
-    idx = int(st.session_state.get("course_run_index") or 0)
-    if queue is not None and len(queue) > 0:
-        st.divider()
-        st.subheader("Course run")
-        st.caption(
-            f"Completed topic **{idx + 1}** of **{len(queue)}** in this course sequence."
-        )
-        if idx < len(queue) - 1:
-            if st.button("Next topic in course →", type="primary", key="btn_course_next_topic"):
-                st.session_state.course_run_index = idx + 1
-                st.session_state.payload_json_text = json.dumps(
-                    queue[idx + 1], ensure_ascii=False, indent=2)
-                _reset_quiz_payload_state_for_new_topic()
-                st.session_state.stage = "generating"
-                st.rerun()
-        else:
-            st.success("Last topic in this course is done.")
-            if st.button("End course run (back to setup)", key="btn_course_end"):
-                _clear_course_run_state()
-                for k in list(st.session_state.keys()):
-                    if k not in ("api_logs",):
-                        del st.session_state[k]
-                _init_state()
-                st.rerun()
-
     if st.button("Start new quiz"):
-        _clear_course_run_state()
         for k in list(st.session_state.keys()):
             if k not in ("api_logs",):
                 del st.session_state[k]
