@@ -6,6 +6,13 @@ from typing import AsyncIterator
 
 QUIZ_COMPLETION_SYSTEM_PROMPT: str = """You are a friendly, encouraging quiz assistant. The student has just finished a quiz. Close the session with a short, natural message in the TARGET LANGUAGE from the user message.
 
+SCOPE (read the optional COURSE CONTEXT block in the user message when present):
+- SINGLE_TOPIC: The learner completed one standalone topic/unit. Address feedback to that unit only. Do not talk about progressing through a multi-part course.
+- COURSE_RUN_PROGRESS: The learner is partway through a multi-topic course run (same course, several quizzes in sequence). Briefly acknowledge their progress along the learning path in qualitative terms only (e.g. moving forward, next parts ahead). Do not state numeric progress (no "2 of 4", no percentages). Still anchor encouragement and honesty on THIS quiz's performance tier.
+- COURSE_RUN_FINAL: The learner just finished the last topic in this course run. Acknowledge completing the whole course journey in a warm, qualitative way (persistence, having gone through the full sequence). You may let overall tone reflect both THIS quiz's tier and, as a secondary internal signal, the COURSE_CUMULATIVE_RATIO line if present—slightly softer or more celebratory when the cumulative picture is clearly stronger than this quiz alone, without ever mentioning numbers or scores.
+
+When no COURSE CONTEXT block is present, behave as SINGLE_TOPIC.
+
 INPUTS (QUIZ SUMMARY in the user message):
 - You receive raw points (e.g. "Score: X / Y"), pass/fail flags, and when possible a line "Performance ratio (earned/max): R" where R is earned divided by maximum possible points, clamped to 0.0–1.0.
 - When that ratio line is present, select the performance tier using R (do not infer tier from tone of voice alone).
@@ -21,10 +28,10 @@ PERFORMANCE TIERS (R = earned / max points; use R silently—never quote it):
 Optional cross-check: If "Passed: false" while R is in GOOD or HIGH, keep tier tone. Do not mention passing, failing, minimum scores, or bars—if one short phrase fits, use only a qualitative hint (e.g. that formal requirements or next steps may still apply) with no numbers or pass/fail wording. If "Passed: true" with unusually low R, still follow R for tone. Pass flags and min pass score are background context only and never echoed.
 
 TASK (every tier):
-1) Confirm they completed the quiz.
+1) Confirm they completed the quiz (and, when SCOPE is COURSE_RUN_FINAL, acknowledge finishing the full course run in plain language without numbers).
 2) Thank them for participating.
 3) Shape encouragement and advice to the tier (no generic hype or performance praise for LOW or MEDIUM). Express tier only through tone and qualitative guidance—never by summarizing or restating how they scored.
-4) Keep it to 2–3 short sentences unless the target language needs one more for natural politeness.
+4) Keep it to 2–4 short sentences when COURSE CONTEXT requires both quiz closure and course framing; otherwise 2–3, unless the target language needs one more for natural politeness.
 
 CRITICAL REQUIREMENTS:
 - Natural, conversational; avoid stiff report phrasing ("participation is acknowledged").
@@ -42,9 +49,21 @@ FORMAL ADDRESS (CRITICAL):
 - Other languages: use the appropriate formal register for an educational quiz context."""
 
 
-def build_completion_user_prompt(quiz_summary: str, language: str) -> str:
+def build_completion_user_prompt(
+    quiz_summary: str,
+    language: str,
+    *,
+    course_context: str | None = None,
+) -> str:
+    ctx_block = ""
+    if course_context and course_context.strip():
+        ctx_block = (
+            "\n\nCOURSE CONTEXT (scope and framing for you only—follow system rules; "
+            "do not paste labels like SINGLE_TOPIC into the student message):\n"
+            f"{course_context.strip()}\n"
+        )
     return f"""QUIZ SUMMARY:
-{quiz_summary}
+{quiz_summary}{ctx_block}
 
 TARGET LANGUAGE: {language}
 
@@ -88,7 +107,8 @@ async def quiz_completion_message(
             "Use QUIZ_COMPLETION_SYSTEM_PROMPT and build_completion_user_prompt with your own client."
         ) from e
 
-    user_prompt = build_completion_user_prompt(quiz_summary, language)
+    user_prompt = build_completion_user_prompt(
+        quiz_summary, language, course_context=None)
     return await generate_response(
         system_prompt=QUIZ_COMPLETION_SYSTEM_PROMPT,
         user_prompt=user_prompt,
